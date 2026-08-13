@@ -1,0 +1,26 @@
+# Render blueprint: one web service, built from the Dockerfile beside it.
+#
+# Everything the demo needs is baked into the image — the pre-computed
+# SQLite database and the compressed corpus — so there is no database
+# service, no disk, and no secret to configure. Nothing here calls a
+# language model at request time; the LLM tier was a batch job whose
+# results are stored.
+services:
+  - type: web
+    name: breach-analytics
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    # Render assigns $PORT; the Dockerfile's CMD already honours it and
+    # falls back to 7860 elsewhere.
+    healthCheckPath: /health
+    envVars:
+      # Signs the session cookies. Render generates a random value, which
+      # is what stops the app falling back to the placeholder key
+      # committed in config.py. See app/main.py::_ensure_signing_key.
+      - key: API_KEY
+        generateValue: true
+      # The frontend is served by this same process, so no cross-origin
+      # request ever happens and CORS needs no relaxation.
+      - key: ALLOWED_ORIGINS
+        value: ""

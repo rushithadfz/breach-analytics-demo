@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Breach Analytics mark: a stack of record rows torn along the
+       brand Z's slant, with the severed side displaced across the
+       fault. Geometry kept identical to components/Logo.tsx.
+
+       Padded into a rounded tile here, unlike the in-app mark: a
+       favicon sits on whatever chrome the browser draws, so it needs
+       its own ground rather than inheriting --paper. -->
+  <defs>
+    <linearGradient id="g" x1="14" y1="30" x2="30" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#e3434a"/>
+      <stop offset="55%" stop-color="#fc7900"/>
+      <stop offset="100%" stop-color="#f4ad0b"/>
+    </linearGradient>
+    <clipPath id="l"><path d="M-2 -2 H20 L12 34 H-2 Z"/></clipPath>
+    <clipPath id="r"><path d="M20 -2 H34 V34 H12 Z"/></clipPath>
+  </defs>
+
+  <rect width="32" height="32" rx="7" fill="#182127"/>
+
+  <g transform="translate(16 16) scale(0.8) translate(-16 -17.7)">
+    <g clip-path="url(#l)" fill="#f6f4ee">
+      <rect x="3" y="4.4" width="26" height="4" rx="1.6"/>
+      <rect x="3" y="10.6" width="26" height="4" rx="1.6"/>
+      <rect x="3" y="16.8" width="26" height="4" rx="1.6"/>
+      <rect x="3" y="23" width="26" height="4" rx="1.6"/>
+    </g>
+    <g transform="translate(1.6 3.4)">
+      <g clip-path="url(#r)" fill="url(#g)">
+        <rect x="3" y="4.4" width="26" height="4" rx="1.6"/>
+        <rect x="3" y="10.6" width="26" height="4" rx="1.6"/>
+        <rect x="3" y="16.8" width="26" height="4" rx="1.6"/>
+        <rect x="3" y="23" width="26" height="4" rx="1.6"/>
+      </g>
+    </g>
+  </g>
+</svg>

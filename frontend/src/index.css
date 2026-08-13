@@ -1,0 +1,292 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap");
+
+/* ---------------------------------------------------------------------
+   Typography is matched to datafactz.com, verified against the rendered
+   site rather than its markup.
+
+   The site's <head> links Inter and a comment calls it the UI face, but
+   no CSS rule ever references it: document.fonts reports Inter 400/500/
+   600/700 as "unloaded", and all 1162 styled elements compute to the
+   Tailwind default stack below. Exactly one element uses Roboto Mono,
+   scoped to code/data. So the stack here is what a visitor to the
+   marketing site actually sees, not what its markup claims.
+
+   (If DataFactZ fixes that link and Inter becomes live, this is a
+   one-line change — add "Inter" to the front of --font-sans.)
+
+   No display serif. The brand site has none, and after two rejected
+   pairings the personality is better carried by the layout than by a
+   face I picked: hairline rules, whitespace, a wide type scale, and
+   Roboto Mono borrowed from the brand's own data vocabulary for
+   eyebrows and identifiers.
+   --------------------------------------------------------------------- */
+
+@theme {
+  /* Byte-identical to the stack computed on datafactz.com. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-brand-yellow: #f4ad0b;
+  --color-brand-orange: #fc7900;
+  --color-brand-red: #e3434a;
+}
+
+/* Light is the default here — the editorial direction is a paper one. */
+:root {
+  color-scheme: light;
+
+  /* Brand gradient stops, as plain custom properties so both CSS and
+     inline SVG can reference them. Identical in both themes — the
+     wordmark does not change colour. */
+  --brand-yellow: #f4ad0b;
+  --brand-orange: #fc7900;
+  --brand-red: #e3434a;
+
+  /* Warm paper, not white. #ffffff reads as "unstyled". */
+  --paper: #fbfaf7;
+  --paper-raised: #ffffff;
+  --paper-sunken: #f3f1ec;
+
+  /* Every ink and status step below is measured at >= 4.5:1 on --paper,
+     including the tertiary one. "It's only a small caption" is how
+     tertiary text ends up at 3.3:1. */
+  --ink: #1a1a19;
+  --ink-2: #5f5c54;
+  --ink-3: #6e6b61;
+
+  --rule: #e4e0d8;
+  --rule-strong: #c9c4b8;
+
+  /* Accent split by job. --accent is the chart mark and large brand
+     shapes; --accent-ink is the darker step required for text and links
+     to clear 4.5:1 on paper. One value cannot do both jobs. */
+  --accent: #eb6834;
+  --accent-ink: #b4460f;
+
+  --good: #097a09;
+  --warning: #8a6000;
+  --critical: #d03b3b;
+
+  --viz-bar: #eb6834;
+  --viz-track: #eae6de;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #14140f;
+  --paper-raised: #1b1b16;
+  --paper-sunken: #100f0c;
+
+  --ink: #f6f4ee;
+  --ink-2: #a9a599;
+  --ink-3: #8d8878;
+
+  --rule: #2c2b24;
+  --rule-strong: #45433a;
+
+  --accent: #e06a2c;
+  --accent-ink: #f0895a;
+
+  --good: #4ec44e;
+  --warning: #fab219;
+  --critical: #ef6a6a;
+
+  --viz-bar: #e06a2c;
+  --viz-track: #26251e;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- Type ---------------------------------------------------------- */
+
+/* With no serif to lean on, display type earns its presence from weight
+   and negative tracking instead. The tightening is size-dependent —
+   -0.04em is right at 60px and would close up the counters at 20px. */
+.display {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -0.038em;
+  line-height: 1.02;
+}
+
+/* Eyebrow set in the mono face. Borrowed from the brand site's own
+   vocabulary, where Roboto Mono is scoped to data — it makes the label
+   read as a field name rather than as a small heading, and it is the
+   one place the page shows a second typeface. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.lede {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); }
+
+/* --- Rules --------------------------------------------------------- */
+
+.rule { border-top: 1px solid var(--rule); }
+.rule-b { border-bottom: 1px solid var(--rule); }
+
+/* A rule that carries a heading: the line runs the full measure and the
+   label sits on it. Cheaper visually than a card header, and it scales
+   to any number of sections without the page turning into a grid. */
+.section-rule {
+  border-top: 1px solid var(--ink);
+  padding-top: 14px;
+}
+
+/* --- Links & focus -------------------------------------------------- */
+
+a { color: inherit; }
+
+.link-accent {
+  color: var(--accent-ink);
+  text-decoration-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 140ms;
+}
+.link-accent:hover { text-decoration: underline; text-decoration-color: currentColor; }
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* --- Brand -----------------------------------------------------------
+   The gradient Z from the DataFactZ wordmark. Slanted, because the
+   original is. */
+.grad-z {
+  display: inline-block;
+  transform: skewX(-11deg);
+  font-weight: 800;
+  background-image: linear-gradient(28deg, var(--brand-red), var(--brand-orange) 52%, var(--brand-yellow));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* --- Motion ----------------------------------------------------------
+   Scroll choreography for the Overview page only. The exposure table
+   and review queue are working screens — someone there is clearing a
+   queue, and animation between them and the data is an obstacle, not
+   craft. Those get no reveals.
+
+   Long durations and a pure ease-out curve: content should settle, not
+   spring. Anything bouncy reads as a template.
+   --------------------------------------------------------------------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 900ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Staggering is expressed as a custom property so a list can set it
+   from its index without a class per step. */
+.reveal { transition-delay: var(--d, 0ms); }
+
+/* Row entrance for lists and tables.
+   Short and shallow on purpose: these are working screens, so the
+   stagger has to be over before it can get in the way of reading. The
+   per-row delay is capped in JS so row 300 is not waiting six seconds. */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.row-in {
+  animation: row-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
+/* The headline rises a line at a time from behind its own mask.
+   The mask needs padding for descenders and a matching negative margin
+   to give it back: overflow:hidden on a bare line box crops the tail of
+   every g, y and p. */
+.line-mask {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.14em;
+  margin-bottom: -0.14em;
+}
+.line-rise {
+  display: block;
+  transform: translateY(105%);
+  transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--d, 0ms);
+}
+.line-rise.in { transform: none; }
+
+/* --- Skeletons ------------------------------------------------------ */
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--paper-sunken);
+  border-radius: 2px;
+}
+.skeleton::after {
+  content: "";
+  position: absolute; inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink) 6%, transparent), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+/* --- Scrollbar ------------------------------------------------------ */
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border-radius: 999px;
+  border: 4px solid var(--paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    transition-delay: 0ms !important;
+  }
+  /* Reduced motion must mean "no movement", never "no content". The
+     reveal classes start at opacity 0, so without these the page would
+     be blank for anyone with the OS setting on. The hooks also return
+     their finished state, so this is belt and braces. */
+  .reveal, .line-rise {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .row-in { animation: none !important; opacity: 1 !important; transform: none !important; }
+}

@@ -1,0 +1,6 @@
+Purchase Order Confirmation
+
+Order reference: 412-98-1568
+This order reference is an internal tracking number and is not a Social
+Security Number, despite the similar formatting. No customer PII is
+included in this confirmation. Ship date: pending warehouse confirmation.

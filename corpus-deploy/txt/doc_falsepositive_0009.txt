@@ -1,0 +1,7 @@
+Corporate Directory Entry
+
+Team: Platform Engineering
+Distribution list: platform-eng@datafactzclient.example
+General inquiries: support@datafactzclient.example
+This entry lists a shared departmental mailbox, not a personal account, and
+should not be attributed to any individual.

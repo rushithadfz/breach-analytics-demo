@@ -1,0 +1,10 @@
+Internal Test Fixture — DO NOT USE IN PRODUCTION
+
+Name: John Doe
+SSN: 000-00-0000
+Email: test@example.com
+Card: 4111 1111 1111 1111
+
+This record is a QA template placeholder seeded into the staging database
+for form-rendering tests. It does not correspond to a real or synthetic
+individual in this engagement and must not appear in the exposure table.
