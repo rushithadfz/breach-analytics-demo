@@ -133,14 +133,41 @@ def _execute_password_recovery(db: Session, doc: Document, corpus_dir: str, run_
         sha256 = hashlib.sha256(f.read()).hexdigest()
     sniff_result = sniff(recovered_full_path)
 
-    recovered_doc = Document(
-        relpath=os.path.relpath(recovered_full_path, corpus_dir).replace("\\", "/"),
-        filename=recovered_filename, declared_extension="pdf",
-        sniffed_type=sniff_result.doc_type, sha256=sha256,
-        size_bytes=os.path.getsize(recovered_full_path),
-        status=DocumentStatus.pending, parent_document_id=doc.id, run_id=run_id,
-    )
-    db.add(recovered_doc)
+    relpath = os.path.relpath(recovered_full_path, corpus_dir).replace("\\", "/")
+
+    # Recovery has to be safe to repeat. The filename is derived from the
+    # source document id, so a second run produces the same path and the
+    # naive insert died on documents.relpath's UNIQUE constraint — taking
+    # the whole agent run with it, after the decryption had already
+    # succeeded. Re-running an agent is normal (the corpus changed, the
+    # earlier run was interrupted, someone is demonstrating it), so an
+    # agent that only works on an empty database is not finished.
+    #
+    # Same trap as the ingestion path, which was made idempotent for
+    # exactly this reason; this route was missed because it only fires
+    # for password-protected files.
+    recovered_doc = db.execute(
+        select(Document).where(Document.relpath == relpath)
+    ).scalar_one_or_none()
+
+    if recovered_doc is None:
+        recovered_doc = Document(
+            relpath=relpath,
+            filename=recovered_filename, declared_extension="pdf",
+            sniffed_type=sniff_result.doc_type, sha256=sha256,
+            size_bytes=os.path.getsize(recovered_full_path),
+            status=DocumentStatus.pending, parent_document_id=doc.id, run_id=run_id,
+        )
+        db.add(recovered_doc)
+    else:
+        # Re-decrypted from the same source, so the bytes are the same
+        # file; refresh what could legitimately differ and reset it for
+        # extraction rather than leaving a half-processed row.
+        recovered_doc.sha256 = sha256
+        recovered_doc.size_bytes = os.path.getsize(recovered_full_path)
+        recovered_doc.sniffed_type = sniff_result.doc_type
+        recovered_doc.parent_document_id = doc.id
+        recovered_doc.run_id = run_id
     db.flush()
 
     return {"recovered": True, "password_tried_count": COMMON_WEAK_PASSWORDS.index(matched_password) + 1,

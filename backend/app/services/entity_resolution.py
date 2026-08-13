@@ -28,7 +28,26 @@ from app.db.models import (
 # normalization ("001-406-..." vs "1-406-...") made the same number look
 # like two — fixed in detectors.normalize_phone, which is a precondition
 # for this being safe rather than a source of false merges.
-STRONG_KEY_CATEGORIES = [PiiCategory.ssn, PiiCategory.card_number, PiiCategory.email, PiiCategory.phone]
+# Values unique enough that sharing one is evidence of being the same
+# person. Driver's licence and passport numbers are government-issued and
+# unique by construction — at least as strong as the SSN already here,
+# and considerably stronger than a phone or an email, which households
+# and departments share.
+#
+# They were missing, and it cost real merges: six licence numbers each
+# spanned two clusters, including "Julie Hopkins" and an unnamed cluster
+# carrying nothing but a date of birth and that same licence. ID-card
+# images are where this bites — OCR reads the licence cleanly off the
+# card and often misses the name, so the card fragments away from the
+# person it belongs to with no way back.
+#
+# Over-sharing is not a risk taken on trust: _demote_organizational_keys
+# removes any key that turns up across an outlying number of documents,
+# which is what would catch a template or test licence number.
+STRONG_KEY_CATEGORIES = [
+    PiiCategory.ssn, PiiCategory.card_number, PiiCategory.email, PiiCategory.phone,
+    PiiCategory.drivers_license, PiiCategory.passport,
+]
 
 
 def _normalize_name(name: str) -> str:
@@ -97,6 +116,57 @@ def _demote_organizational_keys(key_to_documents: dict[tuple, set[int]]) -> set[
         for n, cat, val in preview:
             print(f"    {cat:14s} {val[:46]:48s} appeared in {n} documents")
     return demoted
+
+
+# A "name" that turns out to be a job function.
+#
+# Found by listing which names more than one resolved cluster shares:
+# "Human Resources." held SIX clusters, each with a different date of
+# birth. The detector is not wrong to accept it — two capitalised words
+# after a label is exactly what a name looks like, and it appears in
+# signature blocks precisely where a name belongs. But a department is
+# not a person, and six of them were sitting in a notification list.
+#
+# The test is the same one used for over-shared join keys, applied to
+# names: a value is a role if it is attached to several DIFFERENT strong
+# identities. A real person's name appears with one date of birth. A
+# department's appears with everyone's. That is corpus-derived, so it
+# generalises to "Payroll Department" or "Accounts Receivable" without
+# anyone maintaining a list of job titles — the same reason the label
+# vocabulary is data rather than code.
+_ROLE_NAME_MIN_CLUSTERS = 3
+
+
+def _find_role_names(clusters: dict[tuple, list[Extraction]]) -> set[str]:
+    """Names shared by enough distinct identities to be a job function."""
+    name_to_dobs: dict[str, set[str]] = defaultdict(set)
+    name_to_clusters: dict[str, int] = defaultdict(int)
+
+    for cluster_extractions in clusters.values():
+        names = {e.normalized_value for e in cluster_extractions
+                 if e.category == PiiCategory.full_name and e.normalized_value}
+        dobs = {e.normalized_value for e in cluster_extractions
+                if e.category == PiiCategory.dob and e.normalized_value}
+        for name in names:
+            name_to_clusters[name] += 1
+            name_to_dobs[name] |= dobs
+
+    roles = {
+        name for name, count in name_to_clusters.items()
+        # Both conditions matter. Several clusters alone is ordinary
+        # fragmentation — the same person split across documents, which
+        # is what the adjudicator exists to rejoin. It is the several
+        # *conflicting* dates of birth that say these are different
+        # people wearing one label.
+        if count >= _ROLE_NAME_MIN_CLUSTERS and len(name_to_dobs[name]) >= _ROLE_NAME_MIN_CLUSTERS
+    }
+    if roles:
+        print(f"[entity-resolution] {len(roles)} name(s) demoted as job functions, "
+              f"not people:")
+        for name in sorted(roles):
+            print(f"    {name[:46]:48s} {name_to_clusters[name]} clusters, "
+                  f"{len(name_to_dobs[name])} distinct DOBs")
+    return roles
 
 
 # Chrome words captured as part of a name.
@@ -361,11 +431,16 @@ def run_entity_resolution(db: Session) -> dict:
     for e in extractions:
         clusters[find(record_of(e))].append(e)
 
+    role_names = _find_role_names(clusters)
+
     created_persons = 0
     created_links = 0
     skipped_org_links = 0
     for cluster_extractions in clusters.values():
-        names = [e.normalized_value for e in cluster_extractions if e.category == PiiCategory.full_name]
+        names = [
+            e.normalized_value for e in cluster_extractions
+            if e.category == PiiCategory.full_name and e.normalized_value not in role_names
+        ]
         best_name = max(names, key=len) if names else "Unknown"
         dob_values = [e.normalized_value for e in cluster_extractions if e.category == PiiCategory.dob]
 

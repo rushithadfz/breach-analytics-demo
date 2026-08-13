@@ -90,6 +90,26 @@ class Settings(BaseSettings):
     strong_model: str = "claude-sonnet-5"
     confidence_escalation_threshold: float = 0.72
 
+    # How many times to ask the cheap model the same question, keeping
+    # the union of the answers. Implemented, measured, and defaulted OFF.
+    #
+    # The motivation was real: temperature=0 does not make this model
+    # deterministic. Three identical calls on an out-of-distribution
+    # document stating "early-onset Parkinson's" returned 0, 0, then 1
+    # elements, so a single call looked like a coin flip.
+    #
+    # It does not generalise. Measured over 55 corpus documents the
+    # manifest says contain medical information, samples=3 recovered
+    # exactly ZERO values that samples=1 missed — 18/55 either way, at
+    # 3.0x the tokens. The corpus misses are consistent, not stochastic:
+    # the model reliably declines those, and repeating the question does
+    # not change its mind. Reproduce with `python measure_sampling.py`.
+    #
+    # Kept at 1 because paying triple for a measured gain of zero is not
+    # a trade worth making. Kept in the code because the non-determinism
+    # is real and a different corpus, model or prompt could surface it.
+    llm_samples: int = 1
+
     # Comma-separated categories the LLM tier may extract. Empty means
     # the measured default (medical only) — see DEFAULT_LLM_CATEGORIES in
     # app/services/llm_extraction.py for the evidence behind that scope.

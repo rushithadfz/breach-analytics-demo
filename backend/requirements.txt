@@ -4,6 +4,12 @@ pydantic>=2.6
 pydantic-settings>=2.2
 sqlalchemy>=2.0
 alembic>=1.13
+# Postgres driver. SQLite is the dev default and Postgres the production
+# target (docker-compose.yml), but without this installed a DATABASE_URL
+# pointing at Postgres fails at connect time with ModuleNotFoundError —
+# so "it supports Postgres" was true of the ORM and false of the app.
+# [binary] ships a wheel, so no local libpq build is needed.
+psycopg[binary]>=3.1
 python-multipart>=0.0.9
 pdfplumber>=0.11
 pypdf>=5.0

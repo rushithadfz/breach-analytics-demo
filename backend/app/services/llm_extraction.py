@@ -344,6 +344,53 @@ def _normalize_element(raw: dict, source_text: str | None = None) -> dict | None
     return out
 
 
+def _sampled_extraction(
+    client, model: str, text: str, samples: int, min_interval: float = 0.0,
+) -> tuple[LlmExtractionResult, int, int]:
+    """Ask the same question n times and keep the union of the answers.
+
+    `temperature=0` does not make this model deterministic. Measured, on
+    a document plainly stating "he is being managed for early-onset
+    Parkinson's": three identical calls — same model, same prompt, same
+    parsed text — returned 0, 0, then 1 elements. A single call is a
+    coin flip on whether a real diagnosis is recorded, and the run trace
+    cannot tell that apart from a document that genuinely contains none.
+
+    Union rather than majority vote, because the failure mode here is
+    silence, not disagreement. Across the samples the model either
+    quoted the diagnosis or said nothing; it did not offer a *different*
+    diagnosis. Requiring 2 of 3 to agree would discard the one correct
+    answer in exactly the case this exists to fix. The verbatim-substring
+    check in _normalize_element is what guards against a hallucinated
+    value sneaking in on a single sample — that safety does not depend on
+    repetition.
+
+    Deduplicated on (category, normalised value) so a value found in all
+    three samples is stored once. The highest-confidence copy wins, since
+    confidence feeds the escalation gate downstream.
+
+    Cost is linear in `samples`: three samples is three times the tokens
+    and three times the wall clock. That is only worth paying on a scope
+    the deterministic tier cannot serve at all, which is why the shipped
+    configuration narrows the tier to `medical` first and samples second.
+    """
+    best: dict[tuple[str, str], object] = {}
+    total_in = total_out = 0
+
+    for i in range(max(1, samples)):
+        if i and min_interval:
+            time.sleep(min_interval)
+        result, tin, tout = _call_openai_compatible(client, model, text)
+        total_in += tin
+        total_out += tout
+        for el in result.elements:
+            key = (el.category, (el.value or "").strip().lower())
+            if key not in best or el.confidence > best[key].confidence:
+                best[key] = el
+
+    return LlmExtractionResult(elements=list(best.values())), total_in, total_out
+
+
 def _call_openai_compatible(client, model: str, text: str) -> tuple[LlmExtractionResult, int, int]:
     """Shared call path for Kimi, Groq, Gemini, and Ollama — all expose an
     OpenAI-compatible chat completions endpoint, so one function serves
@@ -519,7 +566,9 @@ def run_llm_extraction_tier(db: Session, corpus_dir: str, mock: bool = False, li
             if mock:
                 result, tin, tout = mock_extract(text, mock_rng)
             else:
-                result, tin, tout = _call_openai_compatible(cheap_client, cheap_model_name, text)
+                result, tin, tout = _sampled_extraction(
+                    cheap_client, cheap_model_name, text, settings.llm_samples, min_interval,
+                )
             model_used = cheap_model_name
         except Exception as e:
             step = Step(run_id=run.id, agent_name="pipeline", step_type=step_label,
@@ -528,8 +577,10 @@ def run_llm_extraction_tier(db: Session, corpus_dir: str, mock: bool = False, li
             continue
         latency_ms = int((time.time() - t0) * 1000)
         cost = 0.0 if mock else _cost_usd(model_used, tin, tout)
+        sample_note = f" over {settings.llm_samples} samples" if settings.llm_samples > 1 and not mock else ""
         db.add(Step(run_id=run.id, agent_name="pipeline", step_type=step_label,
-                     input_summary=doc.relpath, output_summary=f"{len(result.elements)} elements" + (" (mock)" if mock else ""),
+                     input_summary=doc.relpath,
+                     output_summary=f"{len(result.elements)} elements{sample_note}" + (" (mock)" if mock else ""),
                      cost_usd=cost, tokens_in=tin, tokens_out=tout, latency_ms=latency_ms))
         run.total_cost_usd += cost
         run.total_tokens_in += tin
