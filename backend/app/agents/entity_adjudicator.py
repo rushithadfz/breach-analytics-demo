@@ -141,29 +141,79 @@ def find_ambiguous_pairs(db: Session, max_pairs: int = 20) -> list[tuple[int, in
             continue
         already_ruled.add((d.target_id, notes.get("other_person_id")))
 
-    rows = db.execute(
+    # Two sources of ambiguity, because one was not enough.
+    #
+    # Shared address was the original and only signal. It stopped
+    # producing candidates entirely once driver's licence and passport
+    # became join keys: the deterministic resolver now merges most
+    # same-address pairs on hard evidence before the agent ever sees
+    # them, which is the correct outcome and left the agent with nothing
+    # to weigh.
+    #
+    # Shared name is the ambiguity the brief actually names — "the same
+    # person under different names" and "different people who share a
+    # name" are its first two required edge cases. It is also the one the
+    # deterministic resolver deliberately refuses to settle: it demands a
+    # matching date of birth alongside a matching name, because merging
+    # on name alone once lost 50 people to false merges. Every pair it
+    # leaves behind for that reason is, by construction, a judgment call
+    # — which is the definition of this agent's job.
+    def _pairs_from(value_to_people: dict[str, set[int]], describe) -> list[tuple[int, int, str]]:
+        out = []
+        for value, person_ids in value_to_people.items():
+            ids = sorted(person_ids)
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    a, b = ids[i], ids[j]
+                    if (a, b) in already_ruled or (b, a) in already_ruled:
+                        continue
+                    out.append((a, b, describe(value)))
+        return out
+
+    address_rows = db.execute(
         select(ExposureFlag.person_id, Extraction.normalized_value)
         .join(EntityLink, EntityLink.person_id == ExposureFlag.person_id)
         .join(Extraction, Extraction.id == EntityLink.extraction_id)
         .where(ExposureFlag.category == "home_address", Extraction.category == "home_address")
     ).all()
-
     by_address: dict[str, set[int]] = defaultdict(set)
-    for person_id, address in rows:
+    for person_id, address in address_rows:
         by_address[address].add(person_id)
 
-    pairs = []
-    for address, person_ids in by_address.items():
-        person_ids = sorted(person_ids)
-        for i in range(len(person_ids)):
-            for j in range(i + 1, len(person_ids)):
-                a, b = person_ids[i], person_ids[j]
-                if (a, b) in already_ruled or (b, a) in already_ruled:
-                    continue
-                pairs.append((a, b, f"shared home_address evidence: {address!r}"))
-                if len(pairs) >= max_pairs:
-                    return pairs
-    return pairs
+    name_rows = db.execute(
+        select(Person.id, Person.best_known_full_name).where(
+            Person.best_known_full_name.isnot(None),
+            Person.best_known_full_name != "Unknown",
+        )
+    ).all()
+    by_name: dict[str, set[int]] = defaultdict(set)
+    for person_id, name in name_rows:
+        # Case- and order-insensitive, so "Cohen, Joseph" and "Joseph
+        # Cohen" land together. Deliberately not fuzzy: this only has to
+        # nominate a pair for the agent to examine, and a loose matcher
+        # would bury the real candidates under near-misses.
+        key = " ".join(sorted(name.lower().replace(",", " ").split()))
+        by_name[key].add(person_id)
+
+    pairs = (
+        _pairs_from(by_address, lambda v: f"shared home_address evidence: {v!r}")
+        + _pairs_from(by_name, lambda v: f"same name across separate clusters: {v!r}")
+    )
+
+    # Address first: it is the pair type most likely to be two different
+    # people in one household, and therefore the one where a wrong merge
+    # does the most damage. Deduplicated because a pair can be nominated
+    # by both signals, and it should be judged once.
+    seen: set[tuple[int, int]] = set()
+    unique: list[tuple[int, int, str]] = []
+    for a, b, why in pairs:
+        if (a, b) in seen:
+            continue
+        seen.add((a, b))
+        unique.append((a, b, why))
+        if len(unique) >= max_pairs:
+            break
+    return unique
 
 
 def _mock_adjudicate(dossier_a: dict, dossier_b: dict) -> dict:
