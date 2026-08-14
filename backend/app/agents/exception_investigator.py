@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.backends import azure_client, azure_structured_call, json_shape_suffix, resolve_agent_backend
+from app.agents.mcp_tools import build_investigator_tools
 from app.config import get_settings
 from app.db.models import Document, DocumentStatus, Run, RunStatus, RunType, Step
 from app.pipeline.sniff import sniff
@@ -185,7 +186,7 @@ async def run_exception_investigator(db: Session, corpus_dir: str, max_cases: in
         )
 
     if backend == "claude":
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query, tool
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
     run = Run(run_type=RunType.extraction, config_json={"agent": "exception_investigator", "mock": mock, "backend": backend})
     db.add(run)
@@ -198,16 +199,10 @@ async def run_exception_investigator(db: Session, corpus_dir: str, max_cases: in
     decisions: list[dict] = []
 
     if backend == "claude":
-        @tool(
-            "record_investigation",
-            "Record the chosen recovery strategy for this quarantined document.",
-            {"strategy": str, "will_likely_succeed": bool, "reasoning": str},
-        )
-        async def record_investigation(args: dict) -> dict:
-            decisions.append(args)
-            return {"content": [{"type": "text", "text": f"Recorded strategy: {args['strategy']}"}]}
-
-        server = create_sdk_mcp_server(name="investigator_tools", tools=[record_investigation])
+        # Built by app/agents/mcp_tools.py so the surface can be
+        # constructed and exercised without a live model; see
+        # tests/test_mcp_tools.py.
+        server, decisions = build_investigator_tools()
 
     recovered, escalated = 0, 0
     for doc in docs:

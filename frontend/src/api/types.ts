@@ -134,3 +134,13 @@ export interface SignOff {
   superseded?: boolean;
   changed_since?: Record<string, { at_signing: number; now: number }>;
 }
+
+export interface AgentList {
+  agents: { name: string; description: string }[];
+  /** Non-null while one is running; a second launch is refused with 409
+   *  because agents write to the same tables. */
+  running: string | null;
+  started_at: string | null;
+  last: { agent: string; status: string; error?: string; finished_at: string } | null;
+  limits: { max_cases: number; sample_size: number };
+}

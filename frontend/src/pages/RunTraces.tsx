@@ -16,7 +16,27 @@ import {
 } from "../components/ui";
 
 export default function RunTraces() {
-  const { data: runs, error, loading } = useAsync(() => api.runs(), []);
+  const { data: runs, error, loading, reload: reloadRuns } = useAsync(() => api.runs(), []);
+  const { data: agents, reload: reloadAgents } = useAsync(() => api.agents(), []);
+  const [launching, setLaunching] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  /** Mock by default. A live run on the deployed demo spends real tokens
+   *  and takes minutes; mock exercises the same path and writes the same
+   *  trace, which is what a viewer is here to see. */
+  async function launch(name: string, mock = true) {
+    setLaunching(name);
+    setLaunchError(null);
+    try {
+      await api.runAgent(name, mock);
+      // 202: the work outlives the request, so poll rather than await.
+      setTimeout(() => { reloadRuns(); reloadAgents(); }, 2500);
+    } catch (e) {
+      setLaunchError(e instanceof Error ? e.message : "Could not start that agent.");
+    } finally {
+      setLaunching(null);
+    }
+  }
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const { data: steps, loading: stepsLoading } = useAsync(
     () => (selectedRunId ? api.runSteps(selectedRunId) : Promise.resolve([])),
@@ -44,6 +64,36 @@ export default function RunTraces() {
       />
 
       {error && <ErrorState message={error} />}
+      {launchError && <ErrorState message={launchError} />}
+
+      {/* Agents were command-line only, so this page displayed every trace
+          they produced and offered no way to produce one. */}
+      {agents && (
+        <div className="rule-b py-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <span className="text-[14px] font-semibold">Run an agent</span>
+            <span className="text-[12px] text-[var(--ink-3)]">
+              {agents.running
+                ? `${agents.running.replace(/_/g, " ")} is running — agents write to the same tables, so they run one at a time`
+                : "Runs in mock mode: same code path and the same trace, without spending tokens"}
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2.5">
+            {agents.agents.map((a) => (
+              <button
+                key={a.name}
+                title={a.description}
+                disabled={Boolean(agents.running) || launching !== null}
+                onClick={() => launch(a.name)}
+                className="rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--paper-sunken)] disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderColor: "var(--rule-strong)", color: "var(--ink)" }}
+              >
+                {launching === a.name ? "Starting…" : a.name.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {runs && runs.length > 0 && (
         <FigureRow>

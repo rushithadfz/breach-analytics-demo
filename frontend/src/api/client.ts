@@ -95,6 +95,12 @@ export const api = {
   blob: (path: string) => requestBlob(path),
 
   runs: () => request<import("./types").RunSummary[]>("/runs"),
+
+  agents: () => request<import("./types").AgentList>("/agents/"),
+  /** Starts one agent. Returns 202 — the work outlives the request, so
+   *  the caller polls /runs rather than waiting. */
+  runAgent: (name: string, mock: boolean) =>
+    request(`/agents/${name}/run?mock=${mock}`, { method: "POST" }),
   runSteps: (runId: number) => request<import("./types").StepSummary[]>(`/runs/${runId}/steps`),
 
   reviewQueue: () => request<import("./types").ReviewQueueItem[]>("/review/queue"),

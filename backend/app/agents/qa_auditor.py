@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.backends import azure_client, azure_structured_call, json_shape_suffix, resolve_agent_backend
+from app.agents.mcp_tools import build_auditor_tools
 from app.config import get_settings
 from app.db.models import EntityLink, ExposureFlag, Extraction, FlagEvidence, Run, RunStatus, RunType, Step
 
@@ -83,7 +84,7 @@ async def run_qa_auditor(db: Session, sample_size: int = 20, mock: bool = False)
         )
 
     if backend == "claude":
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query, tool
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
     run = Run(run_type=RunType.qa_audit, config_json={"agent": "qa_auditor", "sample_size": sample_size, "mock": mock, "backend": backend})
     db.add(run)
@@ -93,16 +94,10 @@ async def run_qa_auditor(db: Session, sample_size: int = 20, mock: bool = False)
     verdicts: list[dict] = []
 
     if backend == "claude":
-        @tool(
-            "record_audit",
-            "Record the audit verdict for this exposure flag.",
-            {"verdict": str, "reason": str},  # "verified" | "unsupported" | "miscategorized"
-        )
-        async def record_audit(args: dict) -> dict:
-            verdicts.append(args)
-            return {"content": [{"type": "text", "text": f"Recorded: {args['verdict']}"}]}
-
-        server = create_sdk_mcp_server(name="auditor_tools", tools=[record_audit])
+        # Built by app/agents/mcp_tools.py so the surface can be
+        # constructed and exercised without a live model; see
+        # tests/test_mcp_tools.py.
+        server, verdicts = build_auditor_tools()
 
     results = []
     for flag in flags:

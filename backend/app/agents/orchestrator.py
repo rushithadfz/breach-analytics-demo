@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agents.backends import azure_client, azure_structured_call, json_shape_suffix, resolve_agent_backend
+from app.agents.mcp_tools import build_orchestrator_tools
 from app.config import get_settings
 from app.db.models import Document, DocumentStatus, Run, RunStatus, RunType, Step
 
@@ -114,7 +115,7 @@ async def run_orchestrator(db: Session, mock: bool = False) -> dict:
         )
 
     if backend == "claude":
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query, tool
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
     run = Run(run_type=RunType.full_pipeline, config_json={"agent": "orchestrator", "mock": mock, "backend": backend})
     db.add(run)
@@ -158,21 +159,10 @@ async def run_orchestrator(db: Session, mock: bool = False) -> dict:
     else:
         plans: list[dict] = []
 
-        @tool(
-            "record_plan",
-            "Record the campaign plan.",
-            {
-                "next_agent": str,  # "exception_investigator" | "entity_resolution_adjudicator" | "qa_auditor" | "none"
-                "target_scope": str,  # what subset to run it against
-                "reasoning": str,
-                "infra_escalations": list,  # list[str] — anything a retry cannot fix
-            },
-        )
-        async def record_plan(args: dict) -> dict:
-            plans.append(args)
-            return {"content": [{"type": "text", "text": "Plan recorded"}]}
-
-        server = create_sdk_mcp_server(name="orchestrator_tools", tools=[record_plan])
+        # Built by app/agents/mcp_tools.py so the surface can be
+        # constructed and exercised without a live model; see
+        # tests/test_mcp_tools.py.
+        server, plans = build_orchestrator_tools()
 
         t0 = time.time()
         cost_usd, tokens_in, tokens_out, status = 0.0, 0, 0, "ok"

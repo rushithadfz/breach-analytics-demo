@@ -45,6 +45,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.agents.mcp_tools import build_adjudicator_tools
 from app.config import get_settings
 from app.services.proposal_freshness import stamp, staleness
 from app.db.models import (
@@ -274,7 +275,7 @@ async def run_entity_adjudicator(db: Session, max_cases: int = 10, mock: bool = 
         )
 
     if backend == "claude":
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query, tool
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
     elif backend == "azure":
         from openai import OpenAI
         azure_client = OpenAI(api_key=settings.azure_api_key, base_url=settings.azure_openai_endpoint)
@@ -286,20 +287,10 @@ async def run_entity_adjudicator(db: Session, max_cases: int = 10, mock: bool = 
     decisions_recorded: list[dict] = []
 
     if backend == "claude":
-        @tool(
-            "submit_adjudication",
-            "Record the entity-resolution decision for this candidate pair.",
-            {
-                "decision": str,  # "merge" | "split" | "escalate"
-                "confidence": float,
-                "rationale": str,
-            },
-        )
-        async def submit_adjudication(args: dict) -> dict:
-            decisions_recorded.append(args)
-            return {"content": [{"type": "text", "text": f"Recorded: {args['decision']} (confidence {args['confidence']})"}]}
-
-        server = create_sdk_mcp_server(name="adjudicator_tools", tools=[submit_adjudication])
+        # Built by app/agents/mcp_tools.py so the surface can be
+        # constructed and exercised without a live model; see
+        # tests/test_mcp_tools.py.
+        server, decisions_recorded = build_adjudicator_tools()
 
     pairs = find_ambiguous_pairs(db, max_pairs=max_cases)
     for person_a_id, person_b_id, why in pairs:
