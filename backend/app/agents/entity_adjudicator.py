@@ -17,10 +17,15 @@ Agent hygiene (brief section 5):
   - Human approval gate: the agent's decision is never applied directly.
     A "merge" verdict is recorded as a *proposed* ReviewDecision; the
     actual merge only executes when a human approves it via
-    POST /api/v1/review/decisions (see app/api/v1/routes_review.py). This
-    is the "human approval gates on consequential actions (bulk merges,
-    final sign-off)" requirement, implemented with the existing schema
-    rather than a bespoke approval table.
+    POST /api/v1/review/merge-proposals/{id}/approve (see
+    app/api/v1/routes_review.py).
+
+    This covers the per-pair case only. The brief names three
+    consequential actions -- individual merges, BULK merges, and final
+    sign-off -- and an earlier version of this comment claimed the whole
+    requirement was satisfied by the one gate below it, which was an
+    overclaim by two thirds. The other two now exist as
+    POST /review/merge-proposals/approve-bulk and POST /review/sign-off.
   - Every call is logged as a Step with cost/token/latency, so the run
     trace is inspectable in the UI regardless of the verdict.
 

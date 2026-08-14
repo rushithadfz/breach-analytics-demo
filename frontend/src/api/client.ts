@@ -106,6 +106,20 @@ export const api = {
     request(`/review/merge-proposals/${decisionId}/approve?reviewer=${encodeURIComponent(reviewer)}`, { method: "POST" }),
   rejectMerge: (decisionId: number, reviewer: string) =>
     request(`/review/merge-proposals/${decisionId}/reject?reviewer=${encodeURIComponent(reviewer)}`, { method: "POST" }),
+
+  /** Approve every fresh proposal at or above `minConfidence`. Pass
+   *  dryRun to see what would happen without writing anything. */
+  approveMergesBulk: (reviewer: string, minConfidence: number, dryRun = false) =>
+    request<import("./types").BulkApprovalResult>(
+      `/review/merge-proposals/approve-bulk?reviewer=${encodeURIComponent(reviewer)}` +
+      `&min_confidence=${minConfidence}&dry_run=${dryRun}`,
+      { method: "POST" }
+    ),
+
+  signOff: () => request<import("./types").SignOff>("/review/sign-off"),
+  createSignOff: (reviewer: string, note = "") =>
+    request(`/review/sign-off?reviewer=${encodeURIComponent(reviewer)}&note=${encodeURIComponent(note)}`,
+      { method: "POST" }),
 };
 
 export { API_KEY, BASE_URL };

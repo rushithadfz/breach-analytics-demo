@@ -108,3 +108,29 @@ export interface MergeProposal {
   is_stale: boolean;
   stale_reason: string | null;
 }
+
+/** Result of a gated bulk merge approval. `skipped` is deliberately
+ *  returned in full: a reviewer who approves a batch needs to see what
+ *  was NOT approved on their behalf. */
+export interface BulkApprovalResult {
+  status: "merged" | "preview";
+  reviewer: string;
+  min_confidence: number;
+  approved_count: number;
+  approved: { decision_id: number; person_a_id?: number; person_b_id?: number }[];
+  skipped_count: number;
+  skipped: { decision_id: number; reason: string }[];
+}
+
+export interface SignOff {
+  signed_off: boolean;
+  reviewer?: string;
+  signed_at?: string;
+  note?: string;
+  fingerprint_at_signing?: Record<string, number>;
+  current: Record<string, number>;
+  /** The signature was true when given; the table has since changed.
+   *  Not the same as invalid. */
+  superseded?: boolean;
+  changed_since?: Record<string, { at_signing: number; now: number }>;
+}

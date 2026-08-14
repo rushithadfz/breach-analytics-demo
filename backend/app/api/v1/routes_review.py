@@ -10,7 +10,7 @@ actually applied to the database."""
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import require_api_key
@@ -23,18 +23,31 @@ from app.services.proposal_freshness import staleness
 router = APIRouter(prefix="/review", tags=["review"], dependencies=[Depends(require_api_key)])
 
 
+def _already_actioned_ids(db: Session) -> set[int]:
+    """Proposals a human has already approved or rejected.
+
+    Shared by the list and the bulk approval so the two cannot disagree
+    about what is still outstanding — a bulk approve that re-merged an
+    already-approved pair would be applying a decision twice.
+    """
+    actioned: set[int] = set()
+    for d in db.execute(
+        select(ReviewDecision).where(ReviewDecision.target_type == "entity_link_merge_proposal")
+    ).scalars().all():
+        if d.decision in ("human_approved_merge", "human_rejected_merge") and d.notes.startswith("{"):
+            original_id = json.loads(d.notes).get("original_decision_id")
+            if original_id:
+                actioned.add(original_id)
+    return actioned
+
+
 @router.get("/merge-proposals")
 def list_merge_proposals(db: Session = Depends(get_db)):
     all_decisions = db.execute(
         select(ReviewDecision).where(ReviewDecision.target_type == "entity_link_merge_proposal")
     ).scalars().all()
 
-    already_actioned_ids = set()
-    for d in all_decisions:
-        if d.decision in ("human_approved_merge", "human_rejected_merge") and d.notes.startswith("{"):
-            original_id = json.loads(d.notes).get("original_decision_id")
-            if original_id:
-                already_actioned_ids.add(original_id)
+    already_actioned_ids = _already_actioned_ids(db)
 
     rows = sorted(
         (d for d in all_decisions if d.decision.startswith("agent_proposed_") and d.id not in already_actioned_ids),
@@ -91,6 +104,90 @@ def approve_merge_proposal(decision_id: int, reviewer: str, db: Session = Depend
     return {"status": "merged", **result}
 
 
+@router.post("/merge-proposals/approve-bulk")
+def approve_merge_proposals_in_bulk(
+    reviewer: str, min_confidence: float = 0.9, dry_run: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Approve every fresh proposal at or above a confidence threshold.
+
+    The brief names "bulk merges" as the example of a consequential
+    action needing a gate. Approving one at a time is stricter, but it is
+    not an answer for a reviewer facing a hundred of them — the realistic
+    failure is not a careless bulk click, it is fatigue leading to
+    unconsidered individual ones.
+
+    So the batch is gated rather than forbidden, and three things make it
+    safe to offer:
+
+      *A threshold, not "all".* The caller states the confidence they are
+      vouching for. Proposals below it are listed as skipped rather than
+      silently excluded, so the reviewer sees what they did not approve.
+
+      *Per-pair staleness.* Every proposal is re-checked individually
+      inside the loop. A stale one cannot ride along on a batch approval
+      just because its neighbours were fine — that would be precisely the
+      wrong-people merge the freshness guard exists to prevent, executed
+      in bulk.
+
+      *A dry run.* `dry_run=true` reports exactly what would happen and
+      writes nothing, because the reviewer signing for a batch should be
+      able to read it before it exists.
+
+    Each merge is still recorded as its own decision, so the audit trail
+    is per-pair even when the click was not. A batch that produced one
+    line in the log would make the gate cheaper to pass than to justify.
+    """
+    proposals = db.execute(
+        select(ReviewDecision).where(
+            ReviewDecision.target_type == "entity_link_merge_proposal",
+            ReviewDecision.decision == "agent_proposed_merge",
+        ).order_by(ReviewDecision.id)
+    ).scalars().all()
+
+    already = _already_actioned_ids(db)
+
+    approved, skipped = [], []
+    for proposal in proposals:
+        if proposal.id in already:
+            continue
+        notes = json.loads(proposal.notes) if proposal.notes.startswith("{") else {}
+        confidence = notes.get("confidence") or 0.0
+
+        if confidence < min_confidence:
+            skipped.append({"decision_id": proposal.id, "reason": f"confidence {confidence} below {min_confidence}"})
+            continue
+        reason = staleness(db, notes, proposal.target_id)
+        if reason is not None:
+            skipped.append({"decision_id": proposal.id, "reason": f"stale: {reason}"})
+            continue
+        if dry_run:
+            approved.append({"decision_id": proposal.id, "person_a_id": proposal.target_id,
+                             "person_b_id": notes.get("other_person_id"), "confidence": confidence})
+            continue
+
+        result = apply_person_merge(
+            db, keep_person_id=proposal.target_id,
+            merge_person_id=notes["other_person_id"], approved_by=reviewer,
+        )
+        db.add(ReviewDecision(
+            target_type="entity_link_merge_proposal", target_id=proposal.target_id,
+            reviewer=reviewer, decision="human_approved_merge",
+            notes=json.dumps({"original_decision_id": proposal.id, "bulk": True, **result}),
+        ))
+        approved.append({"decision_id": proposal.id, **result})
+
+    if not dry_run:
+        db.commit()
+
+    return {
+        "status": "preview" if dry_run else "merged",
+        "reviewer": reviewer, "min_confidence": min_confidence,
+        "approved_count": len(approved), "approved": approved,
+        "skipped_count": len(skipped), "skipped": skipped,
+    }
+
+
 @router.post("/merge-proposals/{decision_id}/reject")
 def reject_merge_proposal(decision_id: int, reviewer: str, notes: str = "", db: Session = Depends(get_db)):
     decision = db.get(ReviewDecision, decision_id)
@@ -141,3 +238,99 @@ def submit_review_decision(payload: ReviewDecisionIn, db: Session = Depends(get_
     db.add(decision)
     db.commit()
     return {"status": "recorded", "decision_id": decision.id}
+
+
+# --- final sign-off ----------------------------------------------------
+#
+# The third consequential action the brief names, and the one that was
+# missing entirely. A breach notification list is not a dashboard someone
+# glances at; at some point a named person states that this is the list,
+# and that statement is what the organisation acts on and a regulator
+# later asks about.
+#
+# Sign-off is therefore a claim about a specific state of the data, not a
+# flag on the project. It records what the table contained at the moment
+# it was signed, and reports itself as superseded the moment any of that
+# changes — a signature on a document that has since been edited is worse
+# than no signature, because it looks like assurance.
+
+SIGNOFF_TARGET = "exposure_table_signoff"
+
+
+def _table_fingerprint(db: Session) -> dict:
+    """What the reviewer is actually signing for."""
+    return {
+        "persons": db.scalar(select(func.count()).select_from(Person)) or 0,
+        "flags": db.scalar(select(func.count()).select_from(ExposureFlag)) or 0,
+        "flags_needing_review": db.scalar(
+            select(func.count()).select_from(ExposureFlag)
+            .where(ExposureFlag.review_status == ReviewStatus.needs_review)
+        ) or 0,
+    }
+
+
+def _latest_signoff(db: Session) -> ReviewDecision | None:
+    return db.execute(
+        select(ReviewDecision)
+        .where(ReviewDecision.target_type == SIGNOFF_TARGET)
+        .order_by(ReviewDecision.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+@router.get("/sign-off")
+def get_sign_off(db: Session = Depends(get_db)):
+    """Current sign-off state, and whether it still describes the data."""
+    current = _table_fingerprint(db)
+    signoff = _latest_signoff(db)
+    if signoff is None:
+        return {"signed_off": False, "current": current}
+
+    signed = json.loads(signoff.notes) if signoff.notes.startswith("{") else {}
+    at_signing = signed.get("fingerprint", {})
+    changed = {
+        k: {"at_signing": at_signing.get(k), "now": v}
+        for k, v in current.items() if at_signing.get(k) != v
+    }
+    return {
+        "signed_off": True,
+        "reviewer": signoff.reviewer,
+        "signed_at": signoff.decided_at,
+        "note": signed.get("note", ""),
+        "fingerprint_at_signing": at_signing,
+        "current": current,
+        # Not "invalid" — the signature was true when given. It no longer
+        # describes the table, which is a different and recoverable thing.
+        "superseded": bool(changed),
+        "changed_since": changed,
+    }
+
+
+@router.post("/sign-off", status_code=201)
+def create_sign_off(reviewer: str, note: str = "", db: Session = Depends(get_db)):
+    """Sign the exposure table off as reviewed and ready to act on.
+
+    Refuses while flags are still queued for review. Signing a list that
+    the system itself says is unfinished would make the gate decorative,
+    and the count is right there — there is no reading of "reviewed" that
+    survives 100 outstanding items.
+    """
+    fingerprint = _table_fingerprint(db)
+    if fingerprint["flags_needing_review"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{fingerprint['flags_needing_review']} flags still need review. "
+                "Clear the review queue, or reject them, before signing off."
+            ),
+        )
+
+    decision = ReviewDecision(
+        target_type=SIGNOFF_TARGET, target_id=0, reviewer=reviewer,
+        decision="human_signed_off",
+        notes=json.dumps({"note": note, "fingerprint": fingerprint}),
+    )
+    db.add(decision)
+    db.commit()
+    return {"status": "signed_off", "reviewer": reviewer,
+            "signed_at": decision.decided_at, "fingerprint": fingerprint}

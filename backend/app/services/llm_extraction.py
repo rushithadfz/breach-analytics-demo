@@ -47,12 +47,36 @@ PRICING_USD_PER_1M = {
     "moonshotai/kimi-k2-instruct": {"input": 0.0, "output": 0.0},  # real free tier
     "llama-3.3-70b-versatile": {"input": 0.0, "output": 0.0},  # real free tier (Groq)
     "llama3.1": {"input": 0.0, "output": 0.0},  # local Ollama — literally free, always
-    # Azure AI Foundry (program-provisioned sponsorship subscription, not
-    # a personal pay-per-token account) — treated as $0 for this project's
-    # purposes since usage draws on the program's allocation, not personal
-    # billing. Live-verified to work; per-token list price not verified.
-    "deepseek-v3.2": {"input": 0.0, "output": 0.0},
-    "gpt-5.5": {"input": 0.0, "output": 0.0},
+    # Azure, from Microsoft's public retail price API rather than a
+    # remembered figure or a marketing page:
+    #
+    #   https://prices.azure.com/api/retail/prices
+    #     ?$filter=contains(meterName,'DeepSeek')
+    #     ?$filter=contains(meterName,'5.5')
+    #
+    # deepseek-v3.2  — meters "FW DeepSeek V3.2 Inp/Outp DZ Tokens",
+    #                  $0.00062 / $0.00185 per 1K, i.e. $0.62 / $1.85 per 1M.
+    # gpt-5.5        — product "Azure OpenAI GPT5", meters
+    #                  "5.5 ShortCo inp/opt Gl 1M Tokens", $5.00 / $30.00.
+    #
+    # Two choices baked into those numbers, both stated because they
+    # change the answer:
+    #
+    #   *Short context, not long.* Documents here average ~1.5K tokens.
+    #   The long-context meters are exactly 2x ($10 / $45) and would
+    #   apply only to inputs past the short-context boundary.
+    #
+    #   *Global deployment, not Data Zone.* Data Zone is 10-20% dearer
+    #   ($5.50-$6.00 in, $33-$36 out). Global is the cheaper floor, so a
+    #   quoted figure using it understates rather than overstates — the
+    #   safer direction for an estimate someone will hold you to.
+    #
+    # These are LIST prices. The program's Foundry resource draws on a
+    # sponsorship allocation, so the real invoice may be zero to this
+    # project and is certainly not more than this. For a client
+    # extrapolation, list is the honest basis.
+    "deepseek-v3.2": {"input": 0.62, "output": 1.85},
+    "gpt-5.5": {"input": 5.00, "output": 30.00},
 }
 
 # Real, measured free-tier rate limits (requests per minute), not

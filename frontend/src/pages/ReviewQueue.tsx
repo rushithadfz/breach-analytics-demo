@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Check, X } from "lucide-react";
 import { api } from "../api/client";
+import type { BulkApprovalResult } from "../api/types";
 import { useAsync } from "../hooks/useAsync";
 import {
   Button,
@@ -29,8 +30,58 @@ export default function ReviewQueue() {
     reload: reloadProposals,
   } = useAsync(() => api.mergeProposals(), []);
 
+  const { data: signOff, reload: reloadSignOff } = useAsync(() => api.signOff(), []);
+
   const [busy, setBusy] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [bulkPreview, setBulkPreview] = useState<BulkApprovalResult | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const BULK_THRESHOLD = 0.9;
+
+  /** Preview first, always. A batch write whose contents the reviewer
+   *  has not read is not a gate, it is a button. */
+  async function previewBulk() {
+    setBulkBusy(true);
+    setActionError(null);
+    try {
+      setBulkPreview(await api.approveMergesBulk(REVIEWER, BULK_THRESHOLD, true));
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Could not preview the batch.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function confirmBulk() {
+    setBulkBusy(true);
+    setActionError(null);
+    try {
+      await api.approveMergesBulk(REVIEWER, BULK_THRESHOLD, false);
+      setBulkPreview(null);
+      reloadProposals();
+      reloadSignOff();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Could not apply the batch.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function signOffNow() {
+    setBulkBusy(true);
+    setActionError(null);
+    try {
+      await api.createSignOff(REVIEWER, "reviewed in the demo UI");
+      reloadSignOff();
+    } catch (e) {
+      // The 409 here is informative, not a failure: it names how many
+      // flags still need review, which is what the reviewer must act on.
+      setActionError(e instanceof Error ? e.message : "Could not sign off.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function acceptFlag(flagId: number) {
     setBusy(flagId);
@@ -83,11 +134,115 @@ export default function ReviewQueue() {
 
       {actionError && <ErrorState message={actionError} />}
 
+      {/* Sign-off state, first: it is the claim the whole page exists to
+          support, and a reviewer arriving should see whether the list
+          has already been vouched for before they change anything. */}
+      {signOff && (
+        <div
+          className="rule-b flex flex-wrap items-center justify-between gap-4 py-4"
+          aria-live="polite"
+        >
+          <div className="min-w-0">
+            {!signOff.signed_off ? (
+              <>
+                <div className="text-[14px] font-semibold">Not signed off</div>
+                <div className="mt-0.5 text-[12px] text-[var(--ink-3)]">
+                  <span className="tnum">{signOff.current.flags_needing_review}</span> flags still
+                  need review. Sign-off is refused until the queue is clear.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-[14px] font-semibold">
+                  {signOff.superseded ? (
+                    <AlertTriangle className="h-4 w-4" style={{ color: "var(--warning)" }} />
+                  ) : (
+                    <Check className="h-4 w-4" style={{ color: "var(--good)" }} />
+                  )}
+                  Signed off by {signOff.reviewer}
+                </div>
+                <div className="mt-0.5 text-[12px] text-[var(--ink-3)]">
+                  {signOff.superseded ? (
+                    <>
+                      Superseded — the table has changed since signing (
+                      {Object.entries(signOff.changed_since ?? {})
+                        .map(([k, v]) => `${k.replace(/_/g, " ")} ${v.at_signing} → ${v.now}`)
+                        .join(", ")}
+                      ). The signature was true when given; it no longer describes this list.
+                    </>
+                  ) : (
+                    <>
+                      Covers <span className="tnum">{signOff.fingerprint_at_signing?.persons}</span>{" "}
+                      people and <span className="tnum">{signOff.fingerprint_at_signing?.flags}</span> flags.
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          <Button
+            variant="solid"
+            disabled={bulkBusy || (!signOff.signed_off && signOff.current.flags_needing_review > 0)}
+            title={
+              !signOff.signed_off && signOff.current.flags_needing_review > 0
+                ? "Clear the review queue first"
+                : undefined
+            }
+            onClick={signOffNow}
+          >
+            {signOff.signed_off && !signOff.superseded ? "Re-sign" : "Sign off"}
+          </Button>
+        </div>
+      )}
+
       <section className="pt-2">
         <SectionHead
           title="Merge proposals"
           note="Raised by the entity-resolution adjudicator agent. Approving one rewrites identity links."
         />
+
+        {/* Bulk approval, gated behind a preview. Offering it is safer
+            than not: the realistic failure in a long queue is fatigue
+            producing unconsidered individual clicks, not a careless
+            batch one. */}
+        {(proposals?.some((p) => !p.is_stale && p.proposed_action === "agent_proposed_merge") ?? false) && (
+          <div className="rule-b flex flex-wrap items-center justify-between gap-4 py-3.5">
+            {!bulkPreview ? (
+              <>
+                <span className="text-[12px] text-[var(--ink-3)]">
+                  Approve every fresh proposal at confidence{" "}
+                  <span className="tnum">{BULK_THRESHOLD.toFixed(2)}</span> or above, in one
+                  decision.
+                </span>
+                <Button variant="solid" disabled={bulkBusy} onClick={previewBulk}>
+                  Preview bulk approval
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="min-w-0 text-[12px] text-[var(--ink-2)]">
+                  <span className="font-semibold text-[var(--ink)]">
+                    {bulkPreview.approved_count} would be merged
+                  </span>
+                  {bulkPreview.skipped_count > 0 && (
+                    <>
+                      {" "}· <span className="tnum">{bulkPreview.skipped_count}</span> skipped:{" "}
+                      {bulkPreview.skipped.map((s) => `#${s.decision_id} (${s.reason})`).join("; ")}
+                    </>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-5">
+                  <Button variant="good" disabled={bulkBusy || bulkPreview.approved_count === 0} onClick={confirmBulk}>
+                    <Check className="h-3.5 w-3.5" /> Approve {bulkPreview.approved_count}
+                  </Button>
+                  <Button variant="critical" disabled={bulkBusy} onClick={() => setBulkPreview(null)}>
+                    <X className="h-3.5 w-3.5" /> Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {proposalsLoading && <RowsSkeleton rows={2} />}
         {proposalsError && <ErrorState message={proposalsError} />}
         {!proposalsLoading && !proposalsError && proposals?.length === 0 && (
